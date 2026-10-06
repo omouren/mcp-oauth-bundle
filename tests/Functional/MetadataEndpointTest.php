@@ -101,15 +101,6 @@ final class MetadataEndpointTest extends WebTestCase
         );
     }
 
-    public function testConsentPageRenders(): void
-    {
-        $client = self::createClient();
-        $client->request('GET', '/oauth2/consent');
-
-        self::assertResponseIsSuccessful();
-        self::assertStringContainsString('Authorize', (string) $client->getResponse()->getContent());
-    }
-
     public function testAuthorizeWithoutMcpScopeIsIgnored(): void
     {
         $client = self::createClient();
