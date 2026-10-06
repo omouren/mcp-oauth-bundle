@@ -18,11 +18,6 @@ final readonly class DynamicClientRegistrationController
         OAuth2Grants::REFRESH_TOKEN,
     ];
 
-    private const ALLOWED_TOKEN_ENDPOINT_AUTH_METHODS = [
-        'none',
-        'client_secret_post',
-    ];
-
     public function __construct(
         private McpOauthSettings $settings,
         private LeagueClientSynchronizer $clientSynchronizer,
@@ -78,10 +73,10 @@ final readonly class DynamicClientRegistrationController
         }
 
         $tokenEndpointAuthMethod = $payload['token_endpoint_auth_method'] ?? 'none';
-        if (!\is_string($tokenEndpointAuthMethod) || !\in_array($tokenEndpointAuthMethod, self::ALLOWED_TOKEN_ENDPOINT_AUTH_METHODS, true)) {
+        if (!\is_string($tokenEndpointAuthMethod) || !\in_array($tokenEndpointAuthMethod, AuthorizationServerMetadataController::TOKEN_ENDPOINT_AUTH_METHODS, true)) {
             return $this->error(
                 'invalid_client_metadata',
-                'Supported token_endpoint_auth_method values are: none, client_secret_post.',
+                \sprintf('Supported token_endpoint_auth_method values are: %s.', implode(', ', AuthorizationServerMetadataController::TOKEN_ENDPOINT_AUTH_METHODS)),
             );
         }
 

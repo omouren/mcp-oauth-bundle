@@ -76,6 +76,72 @@ final class DynamicClientRegistrationTest extends WebTestCase
         self::assertArrayNotHasKey('client_secret', $payload);
     }
 
+    public function testRegistersConfidentialClientForBasicAuth(): void
+    {
+        $client = self::createClient();
+        $client->request(
+            'POST',
+            '/oauth2/register',
+            [],
+            [],
+            ['CONTENT_TYPE' => 'application/json'],
+            json_encode([
+                'client_name' => 'Test',
+                'redirect_uris' => ['https://claude.ai/api/mcp/auth_callback'],
+                'token_endpoint_auth_method' => 'client_secret_basic',
+            ], \JSON_THROW_ON_ERROR),
+        );
+
+        self::assertResponseStatusCodeSame(201);
+        $payload = json_decode($client->getResponse()->getContent() ?: '', true, 512, \JSON_THROW_ON_ERROR);
+        self::assertSame('client_secret_basic', $payload['token_endpoint_auth_method']);
+        self::assertMatchesRegularExpression('/^[a-f0-9]{64}$/', $payload['client_secret']);
+    }
+
+    public function testAcceptsEveryAdvertisedTokenEndpointAuthMethod(): void
+    {
+        $client = self::createClient();
+        $client->request('GET', '/.well-known/oauth-authorization-server');
+        $metadata = json_decode($client->getResponse()->getContent() ?: '', true, 512, \JSON_THROW_ON_ERROR);
+
+        foreach ($metadata['token_endpoint_auth_methods_supported'] as $method) {
+            $client->request(
+                'POST',
+                '/oauth2/register',
+                [],
+                [],
+                ['CONTENT_TYPE' => 'application/json'],
+                json_encode([
+                    'redirect_uris' => ['https://claude.ai/api/mcp/auth_callback'],
+                    'token_endpoint_auth_method' => $method,
+                ], \JSON_THROW_ON_ERROR),
+            );
+
+            self::assertResponseStatusCodeSame(201, $method);
+        }
+    }
+
+    public function testRejectsUnsupportedTokenEndpointAuthMethod(): void
+    {
+        $client = self::createClient();
+        $client->request(
+            'POST',
+            '/oauth2/register',
+            [],
+            [],
+            ['CONTENT_TYPE' => 'application/json'],
+            json_encode([
+                'redirect_uris' => ['https://claude.ai/api/mcp/auth_callback'],
+                'token_endpoint_auth_method' => 'private_key_jwt',
+            ], \JSON_THROW_ON_ERROR),
+        );
+
+        self::assertResponseStatusCodeSame(400);
+        $payload = json_decode($client->getResponse()->getContent() ?: '', true, 512, \JSON_THROW_ON_ERROR);
+        self::assertSame('invalid_client_metadata', $payload['error']);
+        self::assertStringContainsString('client_secret_basic', $payload['error_description']);
+    }
+
     public function testRejectsInvalidJson(): void
     {
         $client = self::createClient();

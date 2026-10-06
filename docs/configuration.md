@@ -62,6 +62,6 @@ HTTP paths come from mcp-bundle `mcp.servers.*.http.path` (not from this bundle)
 The deprecated DCR endpoint accepts both public and confidential clients:
 
 - `token_endpoint_auth_method: none` creates a public PKCE client
-- `token_endpoint_auth_method: client_secret_post` creates a confidential client and returns `client_secret` once in the registration response
+- `token_endpoint_auth_method: client_secret_basic` or `client_secret_post` creates a confidential client and returns `client_secret` once in the registration response
 
-League 0.10 stores that secret using its plaintext-compatible repository. League 1.2+ stores a password hash while the DCR response still returns the plain secret required by the client. The token endpoint also supports `client_secret_basic` for already registered confidential clients.
+League 0.10 stores that secret using its plaintext-compatible repository. League 1.2+ stores a password hash while the DCR response still returns the plain secret required by the client. League does not bind a client to one method: the token endpoint reads the secret from the `Authorization: Basic` header or from the request body, so both methods work for every confidential client.

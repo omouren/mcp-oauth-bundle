@@ -11,6 +11,16 @@ use Symfony\Component\HttpFoundation\Request;
 
 final readonly class AuthorizationServerMetadataController
 {
+    /**
+     * League reads client credentials from the Basic header or the request body,
+     * so the token endpoint accepts both secret methods for any confidential client.
+     */
+    public const TOKEN_ENDPOINT_AUTH_METHODS = [
+        'client_secret_basic',
+        'client_secret_post',
+        'none',
+    ];
+
     public function __construct(
         private McpOauthSettings $settings,
         private IssuerResolver $issuerResolver,
@@ -27,11 +37,7 @@ final readonly class AuthorizationServerMetadataController
             'response_types_supported' => ['code'],
             'grant_types_supported' => ['authorization_code', 'refresh_token'],
             'code_challenge_methods_supported' => ['S256'],
-            'token_endpoint_auth_methods_supported' => [
-                'client_secret_basic',
-                'client_secret_post',
-                'none',
-            ],
+            'token_endpoint_auth_methods_supported' => self::TOKEN_ENDPOINT_AUTH_METHODS,
             'scopes_supported' => $this->settings->scopes,
         ];
 
