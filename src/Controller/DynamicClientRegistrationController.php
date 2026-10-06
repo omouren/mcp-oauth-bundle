@@ -5,14 +5,25 @@ declare(strict_types=1);
 namespace Omouren\McpOauthBundle\Controller;
 
 use League\Bundle\OAuth2ServerBundle\OAuth2Grants;
+use League\Bundle\OAuth2ServerBundle\ValueObject\RedirectUri;
 use Omouren\McpOauthBundle\McpOauthSettings;
 use Omouren\McpOauthBundle\OAuth\LeagueClientSynchronizer;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\RateLimiter\RateLimiterFactoryInterface;
 
 final readonly class DynamicClientRegistrationController
 {
+    private const LOOPBACK_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
+
+    private const MAX_BODY_BYTES = 16384;
+    private const MAX_CLIENT_NAME_LENGTH = 200;
+    private const MAX_REDIRECT_URIS = 10;
+    private const MAX_REDIRECT_URI_LENGTH = 2000;
+    private const MAX_SCOPE_LENGTH = 1000;
+    private const MAX_SCOPES = 50;
+
     private const ALLOWED_GRANT_TYPES = [
         OAuth2Grants::AUTHORIZATION_CODE,
         OAuth2Grants::REFRESH_TOKEN,
@@ -26,6 +37,7 @@ final readonly class DynamicClientRegistrationController
     public function __construct(
         private McpOauthSettings $settings,
         private LeagueClientSynchronizer $clientSynchronizer,
+        private ?RateLimiterFactoryInterface $rateLimiter = null,
     ) {
     }
 
@@ -33,6 +45,20 @@ final readonly class DynamicClientRegistrationController
     {
         if (!$this->settings->dcrEnabled) {
             return new JsonResponse(['error' => 'invalid_request'], Response::HTTP_NOT_FOUND);
+        }
+
+        if (null !== $this->rateLimiter) {
+            $limit = $this->rateLimiter->create($request->getClientIp() ?? 'unknown')->consume();
+            if (!$limit->isAccepted()) {
+                $response = $this->error('invalid_request', 'Too many client registrations. Try again later.', Response::HTTP_TOO_MANY_REQUESTS);
+                $response->headers->set('Retry-After', (string) max(0, $limit->getRetryAfter()->getTimestamp() - time()));
+
+                return $response;
+            }
+        }
+
+        if (\strlen($request->getContent()) > self::MAX_BODY_BYTES) {
+            return $this->error('invalid_client_metadata', \sprintf('Request body must not exceed %d bytes.', self::MAX_BODY_BYTES));
         }
 
         trigger_deprecation(
@@ -55,15 +81,27 @@ final readonly class DynamicClientRegistrationController
         if (!\is_string($name) || '' === $name) {
             $name = 'MCP client';
         }
+        if (mb_strlen($name) > self::MAX_CLIENT_NAME_LENGTH || 1 === preg_match('/\p{Cc}/u', $name)) {
+            return $this->error(
+                'invalid_client_metadata',
+                \sprintf('client_name must be at most %d characters long and must not contain control characters.', self::MAX_CLIENT_NAME_LENGTH),
+            );
+        }
 
         $redirectUris = $payload['redirect_uris'] ?? null;
-        if (!\is_array($redirectUris) || [] === $redirectUris) {
+        if (!\is_array($redirectUris) || [] === $redirectUris || !array_is_list($redirectUris)) {
             return $this->error('invalid_redirect_uri', 'At least one redirect URI is required.');
+        }
+        if (\count($redirectUris) > self::MAX_REDIRECT_URIS) {
+            return $this->error('invalid_redirect_uri', \sprintf('At most %d redirect URIs are allowed.', self::MAX_REDIRECT_URIS));
         }
 
         foreach ($redirectUris as $redirectUri) {
-            if (!\is_string($redirectUri) || !$this->isAllowedRedirectUri($redirectUri)) {
-                return $this->error('invalid_redirect_uri', \sprintf('Redirect URI "%s" is not allowed.', (string) $redirectUri));
+            if (!\is_string($redirectUri)) {
+                return $this->error('invalid_redirect_uri', 'Redirect URIs must be strings.');
+            }
+            if (!$this->isAllowedRedirectUri($redirectUri)) {
+                return $this->error('invalid_redirect_uri', \sprintf('Redirect URI "%s" is not allowed.', mb_substr($redirectUri, 0, 200)));
             }
         }
 
@@ -85,19 +123,22 @@ final readonly class DynamicClientRegistrationController
             );
         }
 
-        $scopes = $this->normalizeScopes($payload['scope'] ?? null);
-
-        try {
-            $credentials = $this->clientSynchronizer->persistFromDcr(
-                $name,
-                $redirectUris,
-                $tokenEndpointAuthMethod,
-                $grantTypes,
-                $scopes,
+        $scope = $payload['scope'] ?? null;
+        if ((\is_string($scope) && \strlen($scope) > self::MAX_SCOPE_LENGTH) || (\is_array($scope) && \count($scope) > self::MAX_SCOPES)) {
+            return $this->error(
+                'invalid_client_metadata',
+                \sprintf('scope must be at most %d characters long and list at most %d scopes.', self::MAX_SCOPE_LENGTH, self::MAX_SCOPES),
             );
-        } catch (\Throwable) {
-            return new JsonResponse(['error' => 'invalid_redirect_uri'], Response::HTTP_BAD_REQUEST);
         }
+        $scopes = $this->normalizeScopes($scope);
+
+        $credentials = $this->clientSynchronizer->persistFromDcr(
+            $name,
+            $redirectUris,
+            $tokenEndpointAuthMethod,
+            $grantTypes,
+            $scopes,
+        );
 
         $response = [
             'client_id' => $credentials['client_id'],
@@ -118,22 +159,37 @@ final readonly class DynamicClientRegistrationController
         return new JsonResponse($response, Response::HTTP_CREATED);
     }
 
+    /**
+     * @see https://datatracker.ietf.org/doc/html/rfc6749#section-3.1.2
+     * @see https://datatracker.ietf.org/doc/html/rfc8252#section-7
+     */
     private function isAllowedRedirectUri(string $redirectUri): bool
     {
+        if ('' === $redirectUri || \strlen($redirectUri) > self::MAX_REDIRECT_URI_LENGTH || 1 === preg_match('/[\x00-\x20\x7f]/', $redirectUri)) {
+            return false;
+        }
+
         $parts = parse_url($redirectUri);
-        if (false === $parts || !isset($parts['scheme'])) {
+        if (false === $parts || !isset($parts['scheme']) || isset($parts['fragment']) || isset($parts['user']) || isset($parts['pass'])) {
+            return false;
+        }
+
+        // League rejects anything its RedirectUri value object can't hold, so validate it here
+        // instead of failing later at persistence time.
+        try {
+            new RedirectUri($redirectUri);
+        } catch (\RuntimeException) {
             return false;
         }
 
         $scheme = strtolower($parts['scheme']);
-        if (!\in_array($scheme, ['http', 'https'], true)) {
-            return true;
-        }
-
         $host = strtolower($parts['host'] ?? '');
 
-        return 'https' === $scheme
-            || \in_array($host, ['localhost', '127.0.0.1', '[::1]', '::1'], true);
+        return match ($scheme) {
+            'https' => '' !== $host,
+            'http' => \in_array($host, self::LOOPBACK_HOSTS, true),
+            default => \in_array($scheme, $this->settings->dcrRedirectUriSchemes, true),
+        };
     }
 
     /**
@@ -172,11 +228,11 @@ final readonly class DynamicClientRegistrationController
         return [] !== $validated ? $validated : $this->settings->scopes;
     }
 
-    private function error(string $error, string $description): JsonResponse
+    private function error(string $error, string $description, int $status = Response::HTTP_BAD_REQUEST): JsonResponse
     {
         return new JsonResponse([
             'error' => $error,
             'error_description' => $description,
-        ], Response::HTTP_BAD_REQUEST);
+        ], $status);
     }
 }

@@ -33,11 +33,13 @@
         "phpunit/phpunit": "^11.5",
         "symfony/browser-kit": "^7.3|^8.0",
         "symfony/css-selector": "^7.3|^8.0",
-        "symfony/phpunit-bridge": "^7.3|^8.0"
+        "symfony/phpunit-bridge": "^7.3|^8.0",
+        "symfony/rate-limiter": "^7.3|^8.0"
     },
     "suggest": {
         "doctrine/doctrine-bundle": "Default League persistence (oauth2_* tables)",
-        "doctrine/orm": "Default League persistence (oauth2_* tables)"
+        "doctrine/orm": "Default League persistence (oauth2_* tables)",
+        "symfony/rate-limiter": "Per-IP rate limit on the DCR register endpoint (mcp_oauth.dcr.rate_limiter)"
     },
     "conflict": {
         "symfony/framework-bundle": "<7.3"

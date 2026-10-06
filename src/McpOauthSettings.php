@@ -10,6 +10,7 @@ final readonly class McpOauthSettings
      * @param list<string> $resourcePaths MCP HTTP paths from mcp.servers.*.http.path
      * @param list<string> $scopes
      * @param list<string> $trustedDomains
+     * @param list<string> $dcrRedirectUriSchemes
      */
     public function __construct(
         public array $resourcePaths,
@@ -24,6 +25,7 @@ final readonly class McpOauthSettings
         public bool $resourceIndicators,
         public bool $issuerIdentification,
         public ?string $publicBaseUrl,
+        public array $dcrRedirectUriSchemes = [],
     ) {
     }
 }

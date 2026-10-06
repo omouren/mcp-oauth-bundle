@@ -14,6 +14,8 @@ Install, League wiring, and `security.yaml` live in the [Getting started](../REA
 | `cimd.enabled` | bool | `true` | no |
 | `cimd.trusted_domains` | string[] | claude.ai, vscode.dev, cursor.com | no |
 | `dcr.enabled` | bool | `true` | no |
+| `dcr.redirect_uri_schemes` | string[] | `[]` | no |
+| `dcr.rate_limiter` | string or null | `null` | no |
 | `resource_indicators` | bool | `true` | no |
 | `issuer_identification` | bool | `true` | no |
 | `public_base_url` | string or null | `null` | no |
@@ -46,6 +48,11 @@ mcp_oauth:
 
     dcr:
         enabled: true   # Deprecated; see docs/deprecations.md
+        # Extra redirect URI schemes for native apps (RFC 8252), e.g. com.example.app.
+        # https and loopback http (127.0.0.1, [::1], localhost) are always accepted.
+        redirect_uri_schemes: []
+        # Name of a framework.rate_limiter limiter, applied per client IP.
+        rate_limiter: ~
 
     resource_indicators: true
     issuer_identification: true
@@ -56,6 +63,33 @@ mcp_oauth:
 `authorization_prefix` must match the prefix you use to import League routes. `scopes` must stay in sync with League `scopes.available`. Behind a reverse proxy, set `public_base_url` to the public origin (and Symfony `trusted_proxies`).
 
 HTTP paths come from mcp-bundle `mcp.servers.*.http.path` (not from this bundle). Every HTTP server is a protected resource. The firewall `pattern` is written in the app (`^/_mcp`, or a regex covering several paths).
+
+## DCR hardening
+
+The register endpoint is public, so it only accepts:
+
+- redirect URIs using `https`, loopback `http` (`127.0.0.1`, `[::1]`, `localhost`) or a scheme listed in `dcr.redirect_uri_schemes`; never `javascript:`, `data:`, `file:`, URIs with a fragment or with user info
+- at most 10 redirect URIs of at most 2000 characters each
+- a `client_name` of at most 200 characters without control characters
+- a `scope` of at most 1000 characters (or 50 entries)
+- a request body of at most 16 KB
+
+To rate limit registrations per client IP, install `symfony/rate-limiter`, define a limiter and reference it by name:
+
+```yaml
+framework:
+    rate_limiter:
+        mcp_oauth_register:
+            policy: sliding_window
+            limit: 10
+            interval: '1 hour'
+
+mcp_oauth:
+    dcr:
+        rate_limiter: mcp_oauth_register
+```
+
+Over the limit, the endpoint returns `429` with a `Retry-After` header. The limiter keys on `Request::getClientIp()`, so configure Symfony `trusted_proxies` behind a reverse proxy; otherwise every client shares the proxy IP.
 
 ## DCR client authentication
 

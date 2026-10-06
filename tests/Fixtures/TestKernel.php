@@ -66,10 +66,30 @@ final class TestKernel extends Kernel
                 ],
             ],
         ]);
-        $container->extension('mcp_oauth', [
+        $mcpOauthConfig = [
             'login_route' => 'app_login',
             'public_base_url' => 'https://mcp.example.test',
-        ]);
+        ];
+        if ('dcr_hardened' === $this->environment) {
+            $container->extension('framework', [
+                'cache' => [
+                    'pools' => ['cache.test_rate_limiter' => ['adapter' => 'cache.adapter.filesystem']],
+                ],
+                'rate_limiter' => [
+                    'mcp_oauth_register' => [
+                        'policy' => 'fixed_window',
+                        'limit' => 2,
+                        'interval' => '1 hour',
+                        'cache_pool' => 'cache.test_rate_limiter',
+                    ],
+                ],
+            ]);
+            $mcpOauthConfig['dcr'] = [
+                'redirect_uri_schemes' => ['com.example.app'],
+                'rate_limiter' => 'mcp_oauth_register',
+            ];
+        }
+        $container->extension('mcp_oauth', $mcpOauthConfig);
         $container->services()
             ->set(UnauthorizedProbeController::class)
                 ->public()

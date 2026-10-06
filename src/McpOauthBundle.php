@@ -4,12 +4,16 @@ declare(strict_types=1);
 
 namespace Omouren\McpOauthBundle;
 
+use Omouren\McpOauthBundle\Controller\DynamicClientRegistrationController;
 use Omouren\McpOauthBundle\DependencyInjection\LeagueCompatibilityPass;
 use Omouren\McpOauthBundle\DependencyInjection\McpHttpPathPass;
 use Symfony\Component\Config\Definition\Configurator\DefinitionConfigurator;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
 use Symfony\Component\HttpKernel\Bundle\AbstractBundle;
+use Symfony\Component\RateLimiter\RateLimiterFactoryInterface;
+
+use function Symfony\Component\DependencyInjection\Loader\Configurator\service;
 
 final class McpOauthBundle extends AbstractBundle
 {
@@ -41,9 +45,20 @@ final class McpOauthBundle extends AbstractBundle
                 '$resourceIndicators' => $config['resource_indicators'],
                 '$issuerIdentification' => $config['issuer_identification'],
                 '$publicBaseUrl' => $config['public_base_url'],
+                '$dcrRedirectUriSchemes' => $config['dcr']['redirect_uri_schemes'],
             ]);
 
         $container->import('../config/services.yaml');
+
+        $rateLimiter = $config['dcr']['rate_limiter'];
+        if (null !== $rateLimiter && !interface_exists(RateLimiterFactoryInterface::class)) {
+            throw new \LogicException('The "mcp_oauth.dcr.rate_limiter" option requires symfony/rate-limiter. Run "composer require symfony/rate-limiter".');
+        }
+
+        // Set explicitly so autowiring never picks an unrelated limiter by argument name.
+        $container->services()
+            ->get(DynamicClientRegistrationController::class)
+            ->arg('$rateLimiter', null === $rateLimiter ? null : service('limiter.'.$rateLimiter));
     }
 
     public function build(ContainerBuilder $container): void
