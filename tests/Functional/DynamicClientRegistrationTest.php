@@ -43,8 +43,12 @@ final class DynamicClientRegistrationTest extends WebTestCase
             restore_error_handler();
         }
 
-        self::assertNotEmpty($deprecations);
-        self::assertStringContainsString('Dynamic Client Registration', $deprecations[0]);
+        // On Symfony 7.x a cold cache also collects framework deprecations raised while the container compiles.
+        $dcrDeprecations = array_filter(
+            $deprecations,
+            static fn (string $message): bool => str_contains($message, 'Dynamic Client Registration'),
+        );
+        self::assertNotEmpty($dcrDeprecations);
         self::assertResponseStatusCodeSame(201);
 
         $payload = json_decode($client->getResponse()->getContent() ?: '', true, 512, \JSON_THROW_ON_ERROR);

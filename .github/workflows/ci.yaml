@@ -1,0 +1,67 @@
+name: CI
+
+on:
+    push:
+        branches: [main]
+    pull_request:
+
+permissions:
+    contents: read
+
+concurrency:
+    group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+    cancel-in-progress: true
+
+jobs:
+    tests:
+        name: PHP ${{ matrix.php }} / Symfony ${{ matrix.symfony }}${{ matrix.dependencies == 'lowest' && ' (lowest)' || '' }}
+        runs-on: ubuntu-latest
+        strategy:
+            fail-fast: false
+            matrix:
+                php: ['8.2', '8.3', '8.4', '8.5']
+                # 7.3 resolves to league/oauth2-server-bundle 0.10 (1.2 needs ^7.4), 7.4 and 8.x to 1.2.
+                symfony: ['7.3.*', '7.4.*', '8.0.*']
+                dependencies: ['highest']
+                exclude:
+                    - { php: '8.2', symfony: '8.0.*' }
+                    - { php: '8.3', symfony: '8.0.*' }
+                include:
+                    - { php: '8.2', symfony: '7.3.*', dependencies: 'lowest' }
+        steps:
+            - uses: actions/checkout@v4
+
+            - uses: shivammathur/setup-php@v2
+              with:
+                  php-version: ${{ matrix.php }}
+                  coverage: none
+                  tools: flex
+
+            - uses: ramsey/composer-install@v3
+              env:
+                  SYMFONY_REQUIRE: ${{ matrix.symfony }}
+              with:
+                  dependency-versions: ${{ matrix.dependencies }}
+
+            - run: composer show | grep -E '^(league/oauth2-server-bundle|symfony/framework-bundle|symfony/mcp-bundle) '
+
+            - run: vendor/bin/phpunit
+              env:
+                  # Lowest deps pull in old releases (e.g. masterminds/html5 2.6) that trigger PHP 8.1+ deprecations
+                  # the phpunit-bridge 7.3 handler turns into a failure.
+                  SYMFONY_DEPRECATIONS_HELPER: ${{ matrix.dependencies == 'lowest' && 'weak' || '' }}
+
+    phpstan:
+        name: PHPStan
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+
+            - uses: shivammathur/setup-php@v2
+              with:
+                  php-version: '8.4'
+                  coverage: none
+
+            - uses: ramsey/composer-install@v3
+
+            - run: vendor/bin/phpstan analyse --no-progress
