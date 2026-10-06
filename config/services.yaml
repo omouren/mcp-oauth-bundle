@@ -17,8 +17,15 @@ services:
         resource: '../src/Controller/'
         tags: ['controller.service_arguments']
 
+    # Resolves the host before connecting and rejects private and loopback IPs, so a public DNS name
+    # that points inside the network is blocked too.
+    mcp_oauth.cimd_http_client:
+        class: Symfony\Component\HttpClient\NoPrivateNetworkHttpClient
+        arguments: ['@http_client']
+
     Omouren\McpOauthBundle\Cimd\ClientIdMetadataResolver:
         arguments:
+            $httpClient: '@mcp_oauth.cimd_http_client'
             $cache: '@cache.app'
 
     Omouren\McpOauthBundle\OAuth\LeagueClientSynchronizer:

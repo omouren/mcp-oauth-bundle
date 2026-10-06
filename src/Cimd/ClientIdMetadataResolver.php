@@ -6,8 +6,8 @@ namespace Omouren\McpOauthBundle\Cimd;
 
 use Omouren\McpOauthBundle\McpOauthSettings;
 use Psr\Cache\CacheItemPoolInterface;
+use Symfony\Contracts\HttpClient\Exception\ExceptionInterface;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
-use Symfony\Contracts\HttpClient\ResponseInterface;
 
 /**
  * Fetches and validates a Client ID Metadata Document.
@@ -17,6 +17,13 @@ use Symfony\Contracts\HttpClient\ResponseInterface;
  */
 final readonly class ClientIdMetadataResolver
 {
+    /**
+     * Recommended maximum by the CIMD draft, section 6.6.
+     */
+    public const MAX_DOCUMENT_BYTES = 5120;
+
+    private const LOOPBACK_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
+
     public function __construct(
         private HttpClientInterface $httpClient,
         private CacheItemPoolInterface $cache,
@@ -51,23 +58,45 @@ final readonly class ClientIdMetadataResolver
         try {
             $response = $this->httpClient->request('GET', $url, [
                 'timeout' => 5,
-                'max_redirects' => 3,
+                'max_duration' => 10,
+                'max_redirects' => 0,
+                'buffer' => false,
                 'headers' => ['Accept' => 'application/json'],
             ]);
-        } catch (\Throwable $e) {
+
+            // With max_redirects at 0, a 3xx is returned as is and fails here, so no hop is ever followed.
+            if (200 !== $response->getStatusCode()) {
+                throw new CimdException('Client metadata document HTTP status is not 200.');
+            }
+
+            $contentLength = $response->getHeaders(false)['content-length'][0] ?? null;
+            if (null !== $contentLength && (int) $contentLength > self::MAX_DOCUMENT_BYTES) {
+                $response->cancel();
+
+                throw new CimdException('Client metadata document is too large.');
+            }
+
+            $body = '';
+            foreach ($this->httpClient->stream($response) as $chunk) {
+                $body .= $chunk->getContent();
+                if (\strlen($body) > self::MAX_DOCUMENT_BYTES) {
+                    $response->cancel();
+
+                    throw new CimdException('Client metadata document is too large.');
+                }
+            }
+        } catch (ExceptionInterface $e) {
             throw new CimdException('Unable to fetch client metadata document.', 0, $e);
         }
 
-        $this->assertNotRedirectedToUnsafeUrl($response);
-
         try {
-            $data = $response->toArray(false);
-        } catch (\Throwable $e) {
+            $data = json_decode($body, true, 32, \JSON_THROW_ON_ERROR);
+        } catch (\JsonException $e) {
             throw new CimdException('Client metadata document is not valid JSON.', 0, $e);
         }
 
-        if (200 !== $response->getStatusCode()) {
-            throw new CimdException('Client metadata document HTTP status is not 200.');
+        if (!\is_array($data)) {
+            throw new CimdException('Client metadata document must be a JSON object.');
         }
 
         return $data;
@@ -99,6 +128,9 @@ final readonly class ClientIdMetadataResolver
         foreach ($redirectUris as $uri) {
             if (!\is_string($uri) || '' === $uri) {
                 throw new CimdException('Metadata redirect_uris must be strings.');
+            }
+            if (!$this->isAllowedRedirectUri($uri)) {
+                throw new CimdException(\sprintf('Metadata redirect URI "%s" is not allowed.', $uri));
             }
             $uris[] = $uri;
         }
@@ -148,13 +180,22 @@ final readonly class ClientIdMetadataResolver
         }
     }
 
-    private function assertNotRedirectedToUnsafeUrl(ResponseInterface $response): void
+    /**
+     * Only https, or http on a loopback host (RFC 8252 native apps), absolute and without fragment.
+     */
+    private function isAllowedRedirectUri(string $uri): bool
     {
-        $info = $response->getInfo();
-        $finalUrl = $info['url'] ?? null;
-        if (\is_string($finalUrl) && '' !== $finalUrl) {
-            $this->assertSafeUrl($finalUrl);
+        $parts = parse_url($uri);
+        if (false === $parts || !isset($parts['scheme'], $parts['host']) || str_contains($uri, '#')) {
+            return false;
         }
+
+        $scheme = strtolower($parts['scheme']);
+        if ('https' === $scheme) {
+            return true;
+        }
+
+        return 'http' === $scheme && \in_array(strtolower($parts['host']), self::LOOPBACK_HOSTS, true);
     }
 
     private function isBlockedHost(string $host): bool
