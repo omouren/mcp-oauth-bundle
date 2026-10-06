@@ -46,7 +46,7 @@ mcp:
             transports:
                 http: true
             http:
-                path: /_mcp   # keep this explicit: mcp-bundle 0.13 defaults to /mcp/<name>
+                path: /_mcp   # keep this explicit: mcp-bundle 0.13+ defaults to /mcp/<name>
             registry: '*'
 ```
 
