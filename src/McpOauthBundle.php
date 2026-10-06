@@ -6,6 +6,7 @@ namespace Omouren\McpOauthBundle;
 
 use Omouren\McpOauthBundle\DependencyInjection\LeagueCompatibilityPass;
 use Omouren\McpOauthBundle\DependencyInjection\McpHttpPathPass;
+use Omouren\McpOauthBundle\DependencyInjection\PublicBaseUrlPass;
 use Symfony\Component\Config\Definition\Configurator\DefinitionConfigurator;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
@@ -50,5 +51,6 @@ final class McpOauthBundle extends AbstractBundle
     {
         $container->addCompilerPass(new McpHttpPathPass());
         $container->addCompilerPass(new LeagueCompatibilityPass());
+        $container->addCompilerPass(new PublicBaseUrlPass());
     }
 }

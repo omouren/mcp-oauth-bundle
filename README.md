@@ -50,12 +50,13 @@ mcp:
             registry: '*'
 ```
 
-Point this bundle at your existing login (a Symfony route name, not a URL). `consent: auto` skips the consent page after login; the default `page` renders one at `{authorization_prefix}/consent`.
+Point this bundle at your existing login (a Symfony route name, not a URL) and set the public origin used as OAuth issuer. `consent: auto` skips the consent page after login; the default `page` renders one at `{authorization_prefix}/consent`.
 
 ```yaml
 # config/packages/mcp_oauth.yaml
 mcp_oauth:
     login_route: app_login
+    public_base_url: https://mcp.example.com   # or configure framework.trusted_hosts
     # consent: auto
 ```
 

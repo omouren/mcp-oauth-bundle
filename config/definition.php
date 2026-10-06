@@ -51,7 +51,7 @@ return static function (DefinitionConfigurator $definition): void {
                 ->booleanNode('issuer_identification')->defaultTrue()->end()
                 ->scalarNode('public_base_url')
                     ->defaultNull()
-                    ->info('Absolute origin used as OAuth issuer and MCP resource base. Defaults to the current request.')
+                    ->info('Absolute origin used as OAuth issuer and MCP resource base. Required unless framework.trusted_hosts is set, in which case it defaults to the current request.')
                 ->end()
             ->end()
         ->end()

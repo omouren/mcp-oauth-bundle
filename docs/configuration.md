@@ -16,7 +16,7 @@ Install, League wiring, and `security.yaml` live in the [Getting started](../REA
 | `dcr.enabled` | bool | `true` | no |
 | `resource_indicators` | bool | `true` | no |
 | `issuer_identification` | bool | `true` | no |
-| `public_base_url` | string or null | `null` | no |
+| `public_base_url` | string or null | `null` | yes, unless `framework.trusted_hosts` is set |
 
 ```yaml
 mcp_oauth:
@@ -50,10 +50,13 @@ mcp_oauth:
     resource_indicators: true
     issuer_identification: true
 
-    public_base_url: ~   # e.g. https://mcp.example.com
+    # Public origin used as issuer and MCP resource base.
+    public_base_url: https://mcp.example.com
 ```
 
-`authorization_prefix` must match the prefix you use to import League routes. `scopes` must stay in sync with League `scopes.available`. Behind a reverse proxy, set `public_base_url` to the public origin (and Symfony `trusted_proxies`).
+`authorization_prefix` must match the prefix you use to import League routes. `scopes` must stay in sync with League `scopes.available`.
+
+Set `public_base_url` to the public origin of the app. Without it, the issuer and the MCP resource URIs are built from the request `Host` header and the metadata is cached publicly, so anyone could poison a shared cache with a forged host. Leaving it empty is only allowed when [`framework.trusted_hosts`](https://symfony.com/doc/current/reference/configuration/framework.html#trusted-hosts) is configured; otherwise the container fails to compile. Behind a reverse proxy, also configure Symfony `trusted_proxies`.
 
 HTTP paths come from mcp-bundle `mcp.servers.*.http.path` (not from this bundle). Every HTTP server is a protected resource. The firewall `pattern` is written in the app (`^/_mcp`, or a regex covering several paths).
 
